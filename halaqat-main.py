@@ -19,7 +19,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 if not TOKEN:
-    raise ValueError("BOT_TOKEN غير موجود")
+    raise ValueError("BOT_TOKEN غير موجود في ملف .env")
 
 chat_data_store = {}
 
@@ -70,16 +70,17 @@ def format_users(users):
     result = []
 
     for i, (name, status) in enumerate(users.items(), start=1):
-        name = escape(name)
+        safe_name = escape(name)
 
         if status == "read":
-            result.append(f"{rtl}{i}. {name}   ✅")
+            result.append(f"{rtl}{i}. {safe_name} ✅")
         elif status == "listener":
-            result.append(f"{rtl}{i}. {name} (مستمعة)")
+            result.append(f"{rtl}{i}. {safe_name} (مستمعة)")
         else:
-            result.append(f"{rtl}{i}. {name}")
+            result.append(f"{rtl}{i}. {safe_name}")
 
     return "\n".join(result)
+
 
 def build_caption(users):
     return (
@@ -91,13 +92,12 @@ def build_caption(users):
         "🌸💙🌸💙🌸💙🌸💙🌸\n\n"
         "\n"
         "كل طريق تسلكه قد يكون فيه نجاح وفشل إلا طريق القرآن فإنه محفوفٌ بالأُجور\n"
-        "حتى التأتأةُ فيه تؤجر عليها 💙🌸"
+        "حتى التأتأةُ فيه تؤجر عليها 🥀🥀"
     )
 
 
 async def send_message(chat_id, context):
     data = get_chat_data(chat_id)
-
     caption = build_caption(data["users"])
     buttons = build_buttons()
 
@@ -113,7 +113,7 @@ async def send_message(chat_id, context):
         data["message_id"] = msg.message_id
         data["message_type"] = "photo"
 
-    except:
+    except FileNotFoundError:
         msg = await context.bot.send_message(
             chat_id=chat_id,
             text=caption,
@@ -126,9 +126,12 @@ async def send_message(chat_id, context):
 
 async def update_message(chat_id, context):
     data = get_chat_data(chat_id)
-
     caption = build_caption(data["users"])
     buttons = build_buttons()
+
+    if not data["message_id"]:
+        await send_message(chat_id, context)
+        return
 
     try:
         if data["message_type"] == "photo":
@@ -147,74 +150,83 @@ async def update_message(chat_id, context):
                 reply_markup=buttons,
                 parse_mode=ParseMode.HTML,
             )
-    except:
-        await send_message(chat_id, context)
+    except Exception as e:
+        print("Update error:", e)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-
     data = get_chat_data(chat_id)
+
     data["users"] = {}
+    data["message_id"] = None
+    data["message_type"] = None
 
     await send_message(chat_id, context)
+
+    if update.effective_chat.type == "private":
+        await update.message.reply_text("تم إنشاء قائمة اختبار جديدة هنا ✅")
 
 
 async def publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
 
-    data = get_chat_data(int(CHANNEL_ID))
-    data["users"] = {}
+    if not CHANNEL_ID:
+        await update.message.reply_text("CHANNEL_ID غير موجود في ملف .env")
+        return
 
-    await send_message(int(CHANNEL_ID), context)
+    channel_chat_id = int(CHANNEL_ID)
+    data = get_chat_data(channel_chat_id)
+
+    data["users"] = {}
+    data["message_id"] = None
+    data["message_type"] = None
+
+    await send_message(channel_chat_id, context)
     await update.message.reply_text("تم النشر في القناة ✅")
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.from_user
-    name = user.full_name or user.first_name
+    name = user.full_name or user.first_name or "مستخدمة"
 
     chat_id = query.message.chat_id
     data = get_chat_data(chat_id)
     users = data["users"]
 
-    # ✅ سجل اسمي
     if query.data == "register":
         if name in users:
             await query.answer("تم تسجيل اسمك مسبقًا", show_alert=True)
             return
 
         users[name] = "normal"
-        await query.answer()
+        await query.answer("تم تسجيل اسمك ✅")
 
-    # ✅ قرأت
     elif query.data == "read":
         if name not in users:
             await query.answer("سجلي اسمك أولًا", show_alert=True)
             return
 
         users[name] = "read"
-        await query.answer()
+        await query.answer("تم تحديث حالتك إلى قرأت ✅")
 
-    # ✅ مستمعة
     elif query.data == "listener":
         if name not in users:
             await query.answer("سجلي اسمك أولًا", show_alert=True)
             return
 
         users[name] = "listener"
-        await query.answer()
+        await query.answer("تم تحديث حالتك إلى مستمعة 🌸")
 
-    # ✅ حذف
     elif query.data == "delete":
         if name not in users:
             await query.answer("اسمك غير موجود", show_alert=True)
             return
 
         users.pop(name)
-        await query.answer("تم حذف اسمك")
+        await query.answer("تم حذف اسمك 🗑️")
 
     await update_message(chat_id, context)
 
