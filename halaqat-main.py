@@ -1,9 +1,11 @@
 import os
-from dotenv import load_dotenv
-from flask import Flask
-from threading import Thread
+from html import escape
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -12,89 +14,142 @@ from telegram.ext import (
 )
 
 load_dotenv()
+
 TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-app_web = Flask(__name__)
+if not TOKEN:
+    raise ValueError("BOT_TOKEN غير موجود")
 
-@app_web.route("/")
-def home():
-    return "Bot is running"
+chat_data_store = {}
 
-# ---------- BOT ----------
-group_data = {}
+ARABIC_DAYS = {
+    0: "الاثنين",
+    1: "الثلاثاء",
+    2: "الأربعاء",
+    3: "الخميس",
+    4: "الجمعة",
+    5: "السبت",
+    6: "الأحد",
+}
 
-def get_chat_data(chat_id):
-    if chat_id not in group_data:
-        group_data[chat_id] = {
+
+def get_chat_data(chat_id: int) -> dict:
+    if chat_id not in chat_data_store:
+        chat_data_store[chat_id] = {
             "users": {},
-            "list_message_id": None,
+            "message_id": None,
+            "message_type": None,
         }
-    return group_data[chat_id]
+    return chat_data_store[chat_id]
+
+
+def get_today_text():
+    now = datetime.now(ZoneInfo("Asia/Riyadh"))
+    return f"{ARABIC_DAYS[now.weekday()]} - {now.strftime('%Y/%m/%d')}"
+
 
 def build_buttons():
-    keyboard = [
+    return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📝 سجل اسمي", callback_data="register"),
             InlineKeyboardButton("✅ قرأت", callback_data="read"),
+            InlineKeyboardButton("📝 سجل اسمي", callback_data="register"),
         ],
         [
-            InlineKeyboardButton("🌷 مستمعة", callback_data="listener"),
             InlineKeyboardButton("🗑️ احذف اسمي", callback_data="delete"),
+            InlineKeyboardButton("🌸 مستمعة", callback_data="listener"),
         ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    ])
 
-def format_list(users):
+
+def format_users(users):
     if not users:
-        return "📋 قائمة الحلقة:\n\nلا توجد أسماء بعد"
+        return "لا توجد أسماء بعد"
 
-    text = "📋 قائمة الحلقة:\n\n"
+    rtl = "\u200F"
+    result = []
+
     for i, (name, status) in enumerate(users.items(), start=1):
+        name = escape(name)
+
         if status == "read":
-            text += f"{i}. {name} ✅\n"
+            result.append(f"{rtl}{i}. {name}   ✅")
         elif status == "listener":
-            text += f"{i}. {name} (مستمعة)\n"
+            result.append(f"{rtl}{i}. {name} (مستمعة)")
         else:
-            text += f"{i}. {name}\n"
-    return text
+            result.append(f"{rtl}{i}. {name}")
 
-async def send_new_list(chat_id, context):
+    return "\n".join(result)
+
+def build_caption(users):
+    return (
+        f"📅 <b>{escape(get_today_text())}</b>\n\n"
+        "🌸💙🌸💙🌸💙🌸💙🌸\n\n"
+        "<b>قائمة المسجلات</b>\n"
+        "ــــــــــــــــــــــ\n\n"
+        f"{format_users(users)}\n\n"
+        "🌸💙🌸💙🌸💙🌸💙🌸\n\n"
+        "\n"
+        "كل طريق تسلكه قد يكون فيه نجاح وفشل إلا طريق القرآن فإنه محفوفٌ بالأُجور\n"
+        "حتى التأتأةُ فيه تؤجر عليها 💙🌸"
+    )
+
+
+async def send_message(chat_id, context):
     data = get_chat_data(chat_id)
-    text = format_list(data["users"])
 
-    msg = await context.bot.send_message(chat_id=chat_id, text=text)
-    data["list_message_id"] = msg.message_id
-
-async def update_list(chat_id, context):
-    data = get_chat_data(chat_id)
-    text = format_list(data["users"])
-
-    try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=data["list_message_id"],
-            text=text
-        )
-    except:
-        await send_new_list(chat_id, context)
-
-async def send_photo(chat_id, context):
+    caption = build_caption(data["users"])
     buttons = build_buttons()
 
     try:
-        with open("halaqat.png", "rb") as photo:
-            await context.bot.send_photo(
+        with open("form.png", "rb") as photo:
+            msg = await context.bot.send_photo(
                 chat_id=chat_id,
                 photo=photo,
-                caption="🌿 أهلًا بك في بوت منظم أدوار الحلقة",
-                reply_markup=buttons
+                caption=caption,
+                reply_markup=buttons,
+                parse_mode=ParseMode.HTML,
+            )
+        data["message_id"] = msg.message_id
+        data["message_type"] = "photo"
+
+    except:
+        msg = await context.bot.send_message(
+            chat_id=chat_id,
+            text=caption,
+            reply_markup=buttons,
+            parse_mode=ParseMode.HTML,
+        )
+        data["message_id"] = msg.message_id
+        data["message_type"] = "text"
+
+
+async def update_message(chat_id, context):
+    data = get_chat_data(chat_id)
+
+    caption = build_caption(data["users"])
+    buttons = build_buttons()
+
+    try:
+        if data["message_type"] == "photo":
+            await context.bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=data["message_id"],
+                caption=caption,
+                reply_markup=buttons,
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=data["message_id"],
+                text=caption,
+                reply_markup=buttons,
+                parse_mode=ParseMode.HTML,
             )
     except:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="🌿 أهلًا بك في بوت منظم أدوار الحلقة",
-            reply_markup=buttons
-        )
+        await send_message(chat_id, context)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -102,43 +157,78 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = get_chat_data(chat_id)
     data["users"] = {}
 
-    await send_photo(chat_id, context)
-    await send_new_list(chat_id, context)
+    await send_message(chat_id, context)
 
-    try:
-        await update.message.delete()
-    except:
-        pass
+
+async def publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        return
+
+    data = get_chat_data(int(CHANNEL_ID))
+    data["users"] = {}
+
+    await send_message(int(CHANNEL_ID), context)
+    await update.message.reply_text("تم النشر في القناة ✅")
+
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    user = query.from_user
+    name = user.full_name or user.first_name
 
     chat_id = query.message.chat_id
-    user_name = query.from_user.full_name
-
     data = get_chat_data(chat_id)
+    users = data["users"]
 
+    # ✅ سجل اسمي
     if query.data == "register":
-        data["users"][user_name] = "normal"
+        if name in users:
+            await query.answer("تم تسجيل اسمك مسبقًا", show_alert=True)
+            return
+
+        users[name] = "normal"
+        await query.answer()
+
+    # ✅ قرأت
     elif query.data == "read":
-        data["users"][user_name] = "read"
+        if name not in users:
+            await query.answer("سجلي اسمك أولًا", show_alert=True)
+            return
+
+        users[name] = "read"
+        await query.answer()
+
+    # ✅ مستمعة
     elif query.data == "listener":
-        data["users"][user_name] = "listener"
+        if name not in users:
+            await query.answer("سجلي اسمك أولًا", show_alert=True)
+            return
+
+        users[name] = "listener"
+        await query.answer()
+
+    # ✅ حذف
     elif query.data == "delete":
-        data["users"].pop(user_name, None)
+        if name not in users:
+            await query.answer("اسمك غير موجود", show_alert=True)
+            return
 
-    await update_list(chat_id, context)
+        users.pop(name)
+        await query.answer("تم حذف اسمك")
 
-def run_bot():
+    await update_message(chat_id, context)
+
+
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("publish", publish))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Bot running...")
+    print("Bot is running...")
     app.run_polling()
 
+
 if __name__ == "__main__":
-    Thread(target=run_bot).start()
-    app_web.run(host="0.0.0.0", port=10000)
+    main()
