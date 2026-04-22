@@ -176,16 +176,15 @@ async def publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("CHANNEL_ID غير موجود في ملف .env")
         return
 
-    channel_chat_id = int(CHANNEL_ID)
-    data = get_chat_data(channel_chat_id)
+    channel_chat_id = CHANNEL_ID.strip()
 
+    data = get_chat_data(channel_chat_id)
     data["users"] = {}
     data["message_id"] = None
     data["message_type"] = None
 
     await send_message(channel_chat_id, context)
     await update.message.reply_text("تم النشر في القناة ✅")
-
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
