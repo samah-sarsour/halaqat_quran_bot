@@ -17,9 +17,15 @@ load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "halaqat-webhook")
+PORT = int(os.getenv("PORT", "8080"))
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN غير موجود في ملف .env")
+
+if not WEBHOOK_URL:
+    raise ValueError("WEBHOOK_URL غير موجود في ملف .env")
 
 chat_data_store = {}
 
@@ -93,7 +99,7 @@ def build_caption(users):
         "🌸💙🌸💙🌸💙🌸💙🌸\n\n"
         "\n"
         "كل طريق تسلكه قد يكون فيه نجاح وفشل إلا طريق القرآن فإنه محفوفٌ بالأُجور\n"
-        "حتى التأتأةُ فيه تؤجر عليها 💙🌸"
+        "حتى التأتأةُ فيه تؤجر عليها 🌸💙"
     )
 
 
@@ -248,8 +254,14 @@ def main():
     app.add_handler(CommandHandler("publish", publish))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Bot is running...")
-    app.run_polling()
+    print("Bot is running with webhook...")
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=WEBHOOK_SECRET,
+        webhook_url=f"{WEBHOOK_URL}/{WEBHOOK_SECRET}",
+    )
 
 
 if __name__ == "__main__":
