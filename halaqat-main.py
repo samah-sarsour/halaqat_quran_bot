@@ -34,7 +34,7 @@ ARABIC_DAYS = {
 }
 
 
-def get_chat_data(chat_id: int) -> dict:
+def get_chat_data(chat_id):
     if chat_id not in chat_data_store:
         chat_data_store[chat_id] = {
             "users": {},
@@ -69,15 +69,16 @@ def format_users(users):
     rtl = "\u200F"
     result = []
 
-    for i, (name, status) in enumerate(users.items(), start=1):
-        safe_name = escape(name)
+    for i, user_data in enumerate(users.values(), start=1):
+        name = escape(user_data["name"])
+        status = user_data["status"]
 
         if status == "read":
-            result.append(f"{rtl}{i}. {safe_name} ✅")
+            result.append(f"{rtl}{i}. {name} ✅")
         elif status == "listener":
-            result.append(f"{rtl}{i}. {safe_name} (مستمعة)")
+            result.append(f"{rtl}{i}. {name} (مستمعة)")
         else:
-            result.append(f"{rtl}{i}. {safe_name}")
+            result.append(f"{rtl}{i}. {name}")
 
     return "\n".join(result)
 
@@ -92,7 +93,7 @@ def build_caption(users):
         "🌸💙🌸💙🌸💙🌸💙🌸\n\n"
         "\n"
         "كل طريق تسلكه قد يكون فيه نجاح وفشل إلا طريق القرآن فإنه محفوفٌ بالأُجور\n"
-        "حتى التأتأةُ فيه تؤجر عليها 🥀🥀"
+        "حتى التأتأةُ فيه تؤجر عليها 💙🌸"
     )
 
 
@@ -177,18 +178,25 @@ async def publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     channel_chat_id = CHANNEL_ID.strip()
-
     data = get_chat_data(channel_chat_id)
+
     data["users"] = {}
     data["message_id"] = None
     data["message_type"] = None
 
-    await send_message(channel_chat_id, context)
-    await update.message.reply_text("تم النشر في القناة ✅")
+    try:
+        await send_message(channel_chat_id, context)
+        await update.message.reply_text("تم النشر في القناة ✅")
+    except Exception as e:
+        await update.message.reply_text(f"حدث خطأ أثناء النشر:\n{e}")
+        print("Publish error:", e)
+
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.from_user
+
+    user_id = str(user.id)
     name = user.full_name or user.first_name or "مستخدمة"
 
     chat_id = query.message.chat_id
@@ -196,35 +204,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = data["users"]
 
     if query.data == "register":
-        if name in users:
+        if user_id in users:
             await query.answer("تم تسجيل اسمك مسبقًا", show_alert=True)
             return
 
-        users[name] = "normal"
+        users[user_id] = {
+            "name": name,
+            "status": "normal"
+        }
         await query.answer("تم تسجيل اسمك ✅")
 
     elif query.data == "read":
-        if name not in users:
+        if user_id not in users:
             await query.answer("سجلي اسمك أولًا", show_alert=True)
             return
 
-        users[name] = "read"
+        users[user_id]["status"] = "read"
         await query.answer("تم تحديث حالتك إلى قرأت ✅")
 
     elif query.data == "listener":
-        if name not in users:
+        if user_id not in users:
             await query.answer("سجلي اسمك أولًا", show_alert=True)
             return
 
-        users[name] = "listener"
+        users[user_id]["status"] = "listener"
         await query.answer("تم تحديث حالتك إلى مستمعة 🌸")
 
     elif query.data == "delete":
-        if name not in users:
+        if user_id not in users:
             await query.answer("اسمك غير موجود", show_alert=True)
             return
 
-        users.pop(name)
+        users.pop(user_id)
         await query.answer("تم حذف اسمك 🗑️")
 
     await update_message(chat_id, context)
